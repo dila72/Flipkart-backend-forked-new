@@ -56,6 +56,19 @@ const cartSchema = new mongoose.Schema({
         ref: 'Product', 
         required: true 
       },
+      // Store complete product information for cart display
+      product: {
+        _id: String,
+        name: String,
+        title: String,
+        thumbnail: String,
+        price: Number,
+        brand: String,
+        description: String,
+        rating: Number,
+        discountPercentage: Number,
+        stock: Number
+      },
       quantity: { 
         type: Number, 
         required: true, 

@@ -7,7 +7,7 @@ const { Product, Cart } = require("./models");
 // Add item to cart (Protected route)
 router.post("/cart/add", authenticateJWT, async (req, res) => {
   try {
-    const { productId, quantity = 1 } = req.body;
+    const { productId, quantity = 1, product } = req.body;
     const userId = req.user.userId;
 
     if (!productId) {
@@ -18,13 +18,27 @@ router.post("/cart/add", authenticateJWT, async (req, res) => {
     }
 
     // Check if product exists
-    const product = await Product.findById(productId);
-    if (!product) {
+    const productFromDB = await Product.findById(productId);
+    if (!productFromDB) {
       return res.status(404).json({ 
         success: false, 
         message: "Product not found" 
       });
     }
+
+    // Use product data from request or fetch from database
+    const productData = product || {
+      _id: productFromDB._id,
+      name: productFromDB.name || productFromDB.title,
+      title: productFromDB.title || productFromDB.name,
+      thumbnail: productFromDB.thumbnail,
+      price: productFromDB.price,
+      brand: productFromDB.brand,
+      description: productFromDB.description,
+      rating: productFromDB.rating,
+      discountPercentage: productFromDB.discountPercentage,
+      stock: productFromDB.stock
+    };
 
     // Find or create user's active cart
     let cart = await Cart.findOne({ userId, status: "active" });
@@ -45,10 +59,13 @@ router.post("/cart/add", authenticateJWT, async (req, res) => {
     if (existingItemIndex > -1) {
       // Update quantity if item exists
       cart.items[existingItemIndex].quantity += parseInt(quantity);
+      // Update product data in case it has changed
+      cart.items[existingItemIndex].product = productData;
     } else {
-      // Add new item to cart
+      // Add new item to cart with complete product information
       cart.items.push({
         productId,
+        product: productData,
         quantity: parseInt(quantity),
         addedAt: new Date()
       });
