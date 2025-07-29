@@ -2,6 +2,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const bodyParser = require("body-parser");
+const { Product } = require("./models");
 
 const app = express();
 app.use(cors());
@@ -17,10 +18,6 @@ mongoose.connect(
   "mongodb+srv://admin:ygKfZmucQpNhOHMc@cluster0.zvfytaf.mongodb.net/ecommerce",
   { useNewUrlParser: true, useUnifiedTopology: true }
 );
-
-const productSchema = new mongoose.Schema({ name: String, price: Number });
-const Product = mongoose.model("Product", productSchema);
-module.exports.Product = Product;
 
 app.get("/products", async (req, res) => {
   const products = await Product.find();

@@ -1,58 +1,71 @@
 const mongoose = require("mongoose");
 const express = require("express");
 const router = express.Router();
+const { authenticateJWT } = require("./auth");
+const { Product, Cart } = require("./models");
 
-const Cart = mongoose.model(
-  "Cart",
-  new mongoose.Schema({
-    userId: String,
-    items: [
-      {
-        productId: String,
-        quantity: Number,
-      },
-    ],
-  })
-);
-
-router.post("/cart/add", async (req, res) => {
+// Add item to cart (Protected route)
+router.post("/cart/add", authenticateJWT, async (req, res) => {
   try {
-    const { productId, quantity = 1, user } = req.body;
+    const { productId, quantity = 1 } = req.body;
+    const userId = req.user.userId;
 
-    if (!productId || !user) {
-      return res
-        .status(400)
-        .json({ success: false, message: "ProductId and user are required" });
-    }
-
-    let cart = await Cart.findOne({ userId: user, status: "active" });
-
-    if (!cart) {
-      cart = new Cart({ userId: user, items: [], status: "active" });
-    }
-
-    const existingItemIndex = cart.items.findIndex(
-      (item) => item.productId === productId
-    );
-
-    if (existingItemIndex > -1) {
-      cart.items[existingItemIndex].quantity += parseInt(quantity);
-    } else {
-      cart.items.push({
-        productId,
-        quantity: parseInt(quantity),
+    if (!productId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "ProductId is required" 
       });
     }
 
-    cart.updatedAt = new Date();
+    // Check if product exists
+    const product = await Product.findById(productId);
+    if (!product) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Product not found" 
+      });
+    }
+
+    // Find or create user's active cart
+    let cart = await Cart.findOne({ userId, status: "active" });
+
+    if (!cart) {
+      cart = new Cart({ 
+        userId, 
+        items: [], 
+        status: "active" 
+      });
+    }
+
+    // Check if item already exists in cart
+    const existingItemIndex = cart.items.findIndex(
+      (item) => item.productId.toString() === productId
+    );
+
+    if (existingItemIndex > -1) {
+      // Update quantity if item exists
+      cart.items[existingItemIndex].quantity += parseInt(quantity);
+    } else {
+      // Add new item to cart
+      cart.items.push({
+        productId,
+        quantity: parseInt(quantity),
+        addedAt: new Date()
+      });
+    }
+
     await cart.save();
+
+    // Populate product details for response
+    await cart.populate('items.productId');
 
     res.status(201).json({
       success: true,
-      message: "Item added to cart",
+      message: "Item added to cart successfully",
       data: cart,
     });
   } catch (error) {
+    console.error("Error adding item to cart:", error);
     res.status(500).json({
       success: false,
       message: "Failed to add item to cart",
@@ -61,9 +74,185 @@ router.post("/cart/add", async (req, res) => {
   }
 });
 
+// Get user's cart with populated product details (Protected route)
+router.get("/cart", authenticateJWT, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const cart = await Cart.findOne({ userId, status: "active" })
+      .populate('items.productId', 'name price _id')
+      .exec();
+
+    if (!cart) {
+      return res.status(200).json({
+        success: true,
+        message: "Cart is empty",
+        data: {
+          userId,
+          items: [],
+          totalItems: 0,
+          status: 'active'
+        }
+      });
+    }
+
+    // Calculate total items
+    const totalItems = cart.items.reduce((sum, item) => sum + item.quantity, 0);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        ...cart.toObject(),
+        totalItems
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching cart:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch cart",
+      error: error.message,
+    });
+  }
+});
+
+// Update item quantity in cart (Protected route)
+router.put("/cart/update", authenticateJWT, async (req, res) => {
+  try {
+    const { productId, quantity } = req.body;
+    const userId = req.user.userId;
+
+    if (!productId || !quantity || quantity < 1) {
+      return res.status(400).json({
+        success: false,
+        message: "ProductId and valid quantity are required"
+      });
+    }
+
+    const cart = await Cart.findOne({ userId, status: "active" });
+    if (!cart) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart not found"
+      });
+    }
+
+    const itemIndex = cart.items.findIndex(
+      (item) => item.productId.toString() === productId
+    );
+
+    if (itemIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found in cart"
+      });
+    }
+
+    cart.items[itemIndex].quantity = parseInt(quantity);
+    await cart.save();
+
+    // Populate product details for response
+    await cart.populate('items.productId');
+
+    res.status(200).json({
+      success: true,
+      message: "Cart updated successfully",
+      data: cart
+    });
+  } catch (error) {
+    console.error("Error updating cart:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to update cart",
+      error: error.message,
+    });
+  }
+});
+
+// Remove item from cart (Protected route)
+router.delete("/cart/remove/:productId", authenticateJWT, async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const userId = req.user.userId;
+
+    const cart = await Cart.findOne({ userId, status: "active" });
+    if (!cart) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart not found"
+      });
+    }
+
+    const itemIndex = cart.items.findIndex(
+      (item) => item.productId.toString() === productId
+    );
+
+    if (itemIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found in cart"
+      });
+    }
+
+    cart.items.splice(itemIndex, 1);
+    await cart.save();
+
+    // Populate product details for response
+    await cart.populate('items.productId');
+
+    res.status(200).json({
+      success: true,
+      message: "Item removed from cart successfully",
+      data: cart
+    });
+  } catch (error) {
+    console.error("Error removing item from cart:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove item from cart",
+      error: error.message,
+    });
+  }
+});
+
+// Clear entire cart (Protected route)
+router.delete("/cart/clear", authenticateJWT, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const cart = await Cart.findOne({ userId, status: "active" });
+    if (!cart) {
+      return res.status(404).json({
+        success: false,
+        message: "Cart not found"
+      });
+    }
+
+    cart.items = [];
+    await cart.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Cart cleared successfully",
+      data: cart
+    });
+  } catch (error) {
+    console.error("Error clearing cart:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to clear cart",
+      error: error.message,
+    });
+  }
+});
+
+// Get all carts (Admin only - for debugging purposes)
 router.get("/carts", async (req, res) => {
   try {
-    const carts = await Cart.find({});
+    const carts = await Cart.find({})
+      .populate('items.productId', 'name price _id')
+      .populate('userId', 'email')
+      .exec();
 
     res.status(200).json({
       success: true,
